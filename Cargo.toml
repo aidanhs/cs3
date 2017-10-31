@@ -1,0 +1,12 @@
+[package]
+name = "cs3"
+version = "0.1.0"
+authors = ["Aidan Hobson Sayers <aidanhs@cantab.net>"]
+
+[dependencies]
+rusoto_core = "0.28.0"
+rusoto_s3 = "0.28.0"
+
+[lib]
+crate-type = ["staticlib"]
+#crate-type = ["cdylib"]
