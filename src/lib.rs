@@ -1,17 +1,14 @@
-#![feature(process_abort)]
-
 extern crate libc;
 extern crate nix;
 extern crate s3;
 
-use std::env;
 use std::error::Error;
 use std::ffi::CStr;
 use std::mem;
 use std::os::raw::c_char;
 use std::process;
 use std::slice;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use libc::pid_t;
 
@@ -22,21 +19,15 @@ use s3::bucket::Bucket;
 use s3::credentials::Credentials;
 use s3::region::Region;
 
-fn load_credentials() -> Credentials {
-	let aws_access = env::var("AWS_ACCESS_KEY_ID").expect("Must specify AWS_ACCESS_KEY_ID");
-	let aws_secret = env::var("AWS_SECRET_ACCESS_KEY").expect("Must specify AWS_SECRET_ACCESS_KEY");
-	Credentials::new(&aws_access, &aws_secret, None)
-}
-
 #[no_mangle]
-pub extern "C" fn s3_put(bucket: *const c_char, key: *const c_char, body: *const u8, body_len: u64) -> pid_t {
+pub extern "C" fn s3_put(aws_access: *const c_char, aws_secret: *const c_char, bucket: *const c_char, key: *const c_char, body: *const u8, body_len: u64) -> pid_t {
 	match nix::unistd::fork() {
 		Ok(ForkResult::Parent { child }) => {
 			unsafe { mem::transmute(child) }
 		}
 		Ok(ForkResult::Child) => {
 			let begin = Instant::now();
-			let ret = s3_put_inner(bucket, key, body, body_len).map(|v| v.to_string()).map_err(|v| v.to_string());
+			let ret = s3_put_inner(aws_access, aws_secret, bucket, key, body, body_len).map(|v| v.to_string()).map_err(|v| v.to_string());
 			let time_taken = begin.elapsed();
 			process::exit(match ret {
 				Ok(s) => { println!("Successful s3 upload took {:?}: {}", time_taken, s); 60 },
@@ -72,11 +63,13 @@ pub extern "C" fn s3_put_poll(pid: pid_t) -> u64 {
 	}
 }
 
-fn s3_put_inner(bucket: *const c_char, key: *const c_char, body: *const u8, body_len: u64) -> Result<String, Box<Error>> {
+fn s3_put_inner(aws_access: *const c_char, aws_secret: *const c_char, bucket: *const c_char, key: *const c_char, body: *const u8, body_len: u64) -> Result<String, Box<Error>> {
+	let aws_access = unsafe { CStr::from_ptr(aws_access).to_str()? };
+	let aws_secret = unsafe { CStr::from_ptr(aws_secret).to_str()? };
 	let bucket = unsafe { CStr::from_ptr(bucket).to_str()? };
 	let key = unsafe { CStr::from_ptr(key).to_str()? };
 	let body = unsafe { slice::from_raw_parts(body, body_len as usize) };
-	let credentials = load_credentials();
+	let credentials = Credentials::new(aws_access, aws_secret, None);
 	let bucket = Bucket::new(bucket, Region::UsEast1, credentials);
 	let (_, code) = bucket.put(key, body, "text/plain")?;
 	Ok(format!("{:?}", code))
